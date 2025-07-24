@@ -195,4 +195,4 @@ This project was vide coded with Claude Code. It's designed to solve the specifi
 
 ## License
 
-MIT
+Beerware 🍺

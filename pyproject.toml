@@ -4,7 +4,7 @@ version = "0.1.0"
 description = "Isolated Docker environments for Claude Code development"
 readme = "README.md"
 requires-python = ">=3.11"
-license = {text = "MIT"}
+license = {text = "Beerware"}
 authors = [
     {name = "Usman Masood", email = "usmanm@operator.xyz"},
 ]
