@@ -97,7 +97,7 @@ claudespace attach feature-x
 
 ### Services Section
 
-Map Docker Compose services to their environment variables:
+Map Docker Compose services to their environment variables. Only services listed here will have their ports remapped:
 
 ```yaml
 services:
@@ -105,9 +105,9 @@ services:
     env_vars: [DATABASE_URL, POSTGRES_HOST]
   redis:
     env_vars: [REDIS_URL, CACHE_HOST]
-  elasticsearch:
-    skip_port_mapping: true  # Keep original ports
 ```
+
+**Note**: Services not listed in the configuration will keep their original ports. To avoid conflicts when running multiple workspaces, make sure to include all services that expose ports.
 
 ### Advanced Port Mapping
 
@@ -187,6 +187,10 @@ claudespace destroy new-feature
 - Python 3.11+
 - Docker and Docker Compose
 - Git
+
+## About This Project
+
+This project was built entirely with Claude Code through an iterative, exploratory development process. It's designed to solve the specific workflow needs at Operator, but you're encouraged to fork and adapt it to match your own development setup and requirements.
 
 ## License
 

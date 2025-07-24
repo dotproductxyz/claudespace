@@ -61,7 +61,13 @@ class DockerComposeManager:
     def __init__(self, workspace_path: Path, project_name: str):
         self.workspace_path = workspace_path
         self.project_name = project_name
-        self.compose_file = workspace_path / "docker-compose.yml"
+        # Check for both .yml and .yaml extensions
+        yml_file = workspace_path / "docker-compose.yml"
+        yaml_file = workspace_path / "docker-compose.yaml"
+        if yaml_file.exists():
+            self.compose_file = yaml_file
+        else:
+            self.compose_file = yml_file  # Default to .yml for error messages
         self.override_file = workspace_path / "docker-compose.override.yml"
         self.port_mappings: dict[str, tuple[int, int]] = {}
 
@@ -84,9 +90,6 @@ class DockerComposeManager:
 
         for service_name, service_data in compose_data["services"].items():
             if service_name not in services:
-                continue
-
-            if services[service_name].skip_port_mapping:
                 continue
 
             ports = service_data.get("ports", [])
@@ -131,6 +134,15 @@ class DockerComposeManager:
 
     def down(self, volumes: bool = False):
         """Stop Docker Compose services."""
+        # If compose file doesn't exist, try to stop by project name only
+        if not self.compose_file.exists():
+            cmd = ["docker", "compose", "-p", self.project_name, "down"]
+            if volumes:
+                cmd.append("-v")
+            # Don't check return code as project might not exist
+            subprocess.run(cmd, cwd=self.workspace_path, capture_output=True)
+            return
+
         cmd = ["docker", "compose", "-p", self.project_name, "-f", str(self.compose_file)]
 
         if self.override_file.exists():
@@ -145,6 +157,10 @@ class DockerComposeManager:
 
     def is_running(self) -> bool:
         """Check if services are running."""
+        # If compose file doesn't exist, workspace can't be running
+        if not self.compose_file.exists():
+            return False
+
         cmd = [
             "docker",
             "compose",

@@ -32,10 +32,6 @@ services:
   redis:
     env_vars: [REDIS_URL, CACHE_URL]
   
-  # Skip port mapping for services that should use original ports
-  elasticsearch:
-    skip_port_mapping: true
-  
   # Advanced format - explicit port mapping (rarely needed)
   postgres:
     env_mappings:

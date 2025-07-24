@@ -25,7 +25,7 @@ def main():
 
 def find_config_file(explicit_path: str | None = None) -> Path | None:
     """Find config file in current directory or git root."""
-    config_names = [".claudespace.yaml"]
+    config_names = [".claudespace.yaml", ".claudespace.yml"]
 
     if explicit_path:
         config_path = Path(explicit_path)

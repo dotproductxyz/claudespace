@@ -1,9 +1,9 @@
 # Install dependencies
-install:
+deps:
     uv sync
 
 # Install dev dependencies
-install-dev:
+deps-dev:
     uv sync --dev
 
 # Run linting with ruff
@@ -33,3 +33,7 @@ clean:
 # Development mode - run a local instance
 dev:
     uv run claudespace --help
+
+install: clean build
+    uv tool uninstall claudespace
+    uv tool install . --force

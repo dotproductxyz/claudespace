@@ -26,7 +26,6 @@ class ServiceConfig:
     name: str
     env_vars: list[str]
     env_mappings: list[EnvMapping]
-    skip_port_mapping: bool = False
 
 
 @dataclass
@@ -98,7 +97,6 @@ def load_config(config_path: Path) -> WorkspaceConfig:
                 name=service_name,
                 env_vars=cast(list[str], service_data["env_vars"]),
                 env_mappings=[],
-                skip_port_mapping=bool(service_data.get("skip_port_mapping", False)),
             )
         # Advanced format: env_mappings
         elif isinstance(service_data, dict) and "env_mappings" in service_data:
@@ -123,7 +121,6 @@ def load_config(config_path: Path) -> WorkspaceConfig:
                 name=service_name,
                 env_vars=[m.var for m in mappings],
                 env_mappings=mappings,
-                skip_port_mapping=bool(service_data.get("skip_port_mapping", False)),
             )
 
     # Parse env files
