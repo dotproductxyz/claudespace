@@ -116,7 +116,7 @@ def list_workspaces(base_dir: str):
         console.print("No workspaces found.")
         return
 
-    table = Table(title="Claude Workspaces")
+    table = Table(title="Claudespaces")
     table.add_column("Name", style="cyan")
     table.add_column("Path", style="dim")
     table.add_column("Status", style="green")
