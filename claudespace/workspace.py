@@ -1,13 +1,19 @@
 """Workspace management for claudespace."""
 
+import json
+import os
 import shutil
 import subprocess
 from dataclasses import dataclass
 from pathlib import Path
 
+from rich.console import Console
+
 from .config import SetupCommand, WorkspaceConfig
 from .docker_utils import DockerComposeManager
 from .exceptions import ClaudespaceError, WorkspaceExistsError, WorkspaceNotFoundError
+
+console = Console()
 
 
 @dataclass
@@ -35,9 +41,11 @@ class Workspace:
 
     def destroy(self):
         """Destroy workspace and Docker resources."""
+        console.print("[dim]Stopping Docker services and removing volumes...[/dim]")
         compose = DockerComposeManager(self.path, f"claude_{self.name}")
         compose.down(volumes=True)
         if self.path.exists():
+            console.print(f"[dim]Removing workspace directory: {self.path}[/dim]")
             shutil.rmtree(self.path)
 
 
@@ -47,8 +55,13 @@ class WorkspaceManager:
     def __init__(self, base_dir: Path):
         self.base_dir = base_dir
         self.base_dir.mkdir(parents=True, exist_ok=True)
+        # Store sessions in a JSON file in the base directory
+        self.sessions_file = self.base_dir / ".claudespace-sessions.json"
+        self._load_sessions()
 
-    def create_workspace(self, name: str, config: WorkspaceConfig) -> Workspace:
+    def create_workspace(
+        self, name: str, config: WorkspaceConfig, verbose: bool = False
+    ) -> Workspace:
         """Create a new workspace."""
         workspace_path = self.base_dir / name
 
@@ -58,23 +71,42 @@ class WorkspaceManager:
             )
 
         # Clone repository
-        self._clone_repository(config, workspace_path)
+        console.print(f"[dim]Cloning repository from {config.git_url}...[/dim]")
+        self._clone_repository(config, workspace_path, verbose)
 
-        # Create Docker Compose override
+        # Create Docker Compose with remapped ports
+        console.print("[dim]Creating Docker Compose with unique ports...[/dim]")
         compose = DockerComposeManager(workspace_path, f"claude_{name}")
-        compose.create_override(config.services)
+        compose.create_remapped_compose(config.services)
 
         # Update environment files
+        if config.env_files:
+            console.print(f"[dim]Updating environment files: {', '.join(config.env_files)}[/dim]")
         self._update_env_files(workspace_path, config, compose.port_mappings)
 
         # Run install commands
-        self._run_commands(workspace_path, config.install_commands)
+        if config.install_commands:
+            console.print(
+                f"[dim]Running {len(config.install_commands)} install command(s)...[/dim]"
+            )
+        self._run_commands(workspace_path, config.install_commands, verbose=verbose)
 
         # Start Docker services
+        console.print("[dim]Starting Docker services...[/dim]")
         compose.up()
 
         # Run post-start commands
-        self._run_commands(workspace_path, config.post_start_commands, compose)
+        if config.post_start_commands:
+            console.print(
+                f"[dim]Running {len(config.post_start_commands)} post-start command(s)...[/dim]"
+            )
+        self._run_commands(workspace_path, config.post_start_commands, compose, verbose=verbose)
+
+        # Start a Claude session for this workspace
+        console.print("[dim]Initializing Claude session...[/dim]")
+        session_id = self.start_claude_session(workspace_path)
+        if session_id:
+            self.set_session_id(name, session_id)
 
         return Workspace(name, workspace_path, config)
 
@@ -82,9 +114,13 @@ class WorkspaceManager:
         """Get an existing workspace."""
         workspace_path = self.base_dir / name
         if not workspace_path.exists():
-            raise WorkspaceNotFoundError(
-                f"Workspace '{name}' not found. Available workspaces: {', '.join(w.name for w in self.list_workspaces()) or 'none'}"
-            )
+            workspaces = self.list_workspaces()
+            if workspaces:
+                raise WorkspaceNotFoundError(
+                    f"Workspace '{name}' not found. Available workspaces: {', '.join(w.name for w in workspaces)}"
+                )
+            else:
+                raise WorkspaceNotFoundError(f"Workspace '{name}' not found")
 
         # TODO: Load config from workspace
         return Workspace(name, workspace_path, None)
@@ -103,7 +139,13 @@ class WorkspaceManager:
         workspace = self.get_workspace(name)
         workspace.destroy()
 
-    def _clone_repository(self, config: WorkspaceConfig, dest: Path):
+        # Remove the session ID for this workspace
+        if name in self.sessions:
+            console.print(f"[dim]Removing Claude session for workspace '{name}'[/dim]")
+            del self.sessions[name]
+            self._save_sessions()
+
+    def _clone_repository(self, config: WorkspaceConfig, dest: Path, verbose: bool = False):
         """Clone the repository."""
         cmd = ["git", "clone"]
         if config.clone_depth > 0:
@@ -113,9 +155,12 @@ class WorkspaceManager:
         cmd.extend([config.git_url, str(dest)])
 
         try:
-            subprocess.run(cmd, check=True, capture_output=True, text=True)
+            if verbose:
+                subprocess.run(cmd, check=True, text=True)
+            else:
+                subprocess.run(cmd, check=True, capture_output=True, text=True)
         except subprocess.CalledProcessError as e:
-            error_msg = e.stderr.strip()
+            error_msg = e.stderr.strip() if not verbose else f"Exit code {e.returncode}"
             if "Repository not found" in error_msg:
                 raise ClaudespaceError(f"Repository not found: {config.git_url}") from e
             elif "Could not resolve host" in error_msg:
@@ -174,26 +219,110 @@ class WorkspaceManager:
         workspace_path: Path,
         commands: list[SetupCommand],
         compose_manager: DockerComposeManager | None = None,
+        verbose: bool = False,
     ):
         """Run setup commands."""
         for cmd in commands:
             # Wait for services if specified
             if cmd.wait_for and compose_manager:
                 for service in cmd.wait_for:
+                    console.print(f"  [dim]Waiting for service '{service}' to be healthy...[/dim]")
                     try:
                         compose_manager.wait_for_service(service)
                     except TimeoutError as e:
                         raise ClaudespaceError(f"Service '{service}' failed to start: {e}") from e
 
             # Run command
+            console.print(f"  [dim]Running: {cmd.name}[/dim]")
+            if verbose:
+                console.print(f"    [dim]Command: {cmd.command}[/dim]")
+
+            # Get user's default shell
+            user_shell = os.environ.get("SHELL", "/bin/bash")
+
+            # Use -ic for interactive shell to ensure .zshrc/.bashrc is loaded
+            # This is what your terminal does and why nvm works there
+            shell_cmd = [user_shell, "-ic", cmd.command]
+
             try:
-                subprocess.run(
-                    cmd.command,
-                    shell=True,
-                    cwd=workspace_path,
-                    check=True,
-                    capture_output=True,
-                    text=True,
-                )
+                if verbose:
+                    # Show command output in verbose mode
+                    result = subprocess.run(
+                        shell_cmd,
+                        cwd=workspace_path,
+                        text=True,
+                        env={**os.environ, "PWD": str(workspace_path)},
+                    )
+                    if result.returncode != 0:
+                        raise subprocess.CalledProcessError(result.returncode, cmd.command)
+                else:
+                    # Capture output in non-verbose mode
+                    subprocess.run(
+                        shell_cmd,
+                        cwd=workspace_path,
+                        check=True,
+                        capture_output=True,
+                        text=True,
+                        env={**os.environ, "PWD": str(workspace_path)},
+                    )
             except subprocess.CalledProcessError as e:
-                raise ClaudespaceError(f"Command '{cmd.name}' failed: {e.stderr.strip()}") from e
+                if verbose:
+                    raise ClaudespaceError(
+                        f"Command '{cmd.name}' failed with exit code {e.returncode}"
+                    ) from e
+                else:
+                    raise ClaudespaceError(
+                        f"Command '{cmd.name}' failed: {e.stderr.strip()}"
+                    ) from e
+
+    def _load_sessions(self):
+        """Load sessions from file."""
+        if self.sessions_file.exists():
+            with open(self.sessions_file) as f:
+                self.sessions = json.load(f)
+        else:
+            self.sessions = {}
+
+    def _save_sessions(self):
+        """Save sessions to file."""
+        with open(self.sessions_file, "w") as f:
+            json.dump(self.sessions, f, indent=2)
+
+    def get_session_id(self, workspace_name: str) -> str | None:
+        """Get the Claude session ID for a workspace."""
+        return self.sessions.get(workspace_name)
+
+    def set_session_id(self, workspace_name: str, session_id: str):
+        """Set the Claude session ID for a workspace."""
+        self.sessions[workspace_name] = session_id
+        self._save_sessions()
+
+    def start_claude_session(self, workspace_path: Path) -> str | None:
+        """Start a new Claude session and return the session ID."""
+        try:
+            # Run claude with a simple prompt to get a session started
+            result = subprocess.run(
+                [
+                    "claude",
+                    "--print",
+                    "--output-format",
+                    "json",
+                    "Hello!",
+                ],
+                cwd=workspace_path,
+                capture_output=True,
+                text=True,
+                check=True,
+            )
+
+            # Parse the JSON response to get the session ID
+            response = json.loads(result.stdout)
+            session_id = response.get("session_id")
+
+            if session_id:
+                console.print(f"[dim]Created Claude session: {session_id}[/dim]")
+
+            return session_id
+        except (subprocess.CalledProcessError, json.JSONDecodeError, KeyError) as e:
+            console.print(f"[yellow]Warning: Could not create Claude session: {e}[/yellow]")
+            return None

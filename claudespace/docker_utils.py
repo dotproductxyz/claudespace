@@ -65,27 +65,27 @@ class DockerComposeManager:
         yml_file = workspace_path / "docker-compose.yml"
         yaml_file = workspace_path / "docker-compose.yaml"
         if yaml_file.exists():
-            self.compose_file = yaml_file
+            self.original_compose_file = yaml_file
         else:
-            self.compose_file = yml_file  # Default to .yml for error messages
-        self.override_file = workspace_path / "docker-compose.override.yml"
+            self.original_compose_file = yml_file  # Default to .yml for error messages
+        # We'll create a new compose file with remapped ports
+        self.compose_file = workspace_path / "docker-compose.claudespace.yml"
         self.port_mappings: dict[str, tuple[int, int]] = {}
 
-    def create_override(self, services: dict[str, Any]):
-        """Create docker-compose.override.yml with new ports."""
-        if not self.compose_file.exists():
-            raise DockerError(f"Docker Compose file not found: {self.compose_file}")
+    def create_remapped_compose(self, services: dict[str, Any]):
+        """Create a new docker-compose file with remapped ports."""
+        if not self.original_compose_file.exists():
+            raise DockerError(f"Docker Compose file not found: {self.original_compose_file}")
 
         # Parse original compose file
-        with open(self.compose_file) as f:
+        with open(self.original_compose_file) as f:
             compose_data = yaml.safe_load(f)
 
         if not compose_data or "services" not in compose_data:
             console.print("[yellow]Warning: No services found in docker-compose.yml[/yellow]")
             return
 
-        # Create override with new ports
-        override: dict[str, Any] = {"version": compose_data.get("version", "3"), "services": {}}
+        # Create a copy of the compose data to modify
         allocator = PortAllocator()
 
         for service_name, service_data in compose_data["services"].items():
@@ -107,48 +107,57 @@ class DockerComposeManager:
                         new_port = allocator.allocate_port(old_port)
                         new_ports.append(f"{new_port}:{container_port}")
                         self.port_mappings[service_name] = (old_port, new_port)
+                        console.print(
+                            f"  [dim]Service '{service_name}': port {old_port} → {new_port}[/dim]"
+                        )
                     else:
                         # Single port number
                         old_port = int(parts[0])
                         new_port = allocator.allocate_port(old_port)
                         new_ports.append(f"{new_port}:{old_port}")
                         self.port_mappings[service_name] = (old_port, new_port)
+                        console.print(
+                            f"  [dim]Service '{service_name}': port {old_port} → {new_port}[/dim]"
+                        )
 
             if new_ports:
-                override["services"][service_name] = {"ports": new_ports}
+                # Update the ports in the compose data directly
+                compose_data["services"][service_name]["ports"] = new_ports
 
-        # Write override file
-        with open(self.override_file, "w") as f:
-            yaml.dump(override, f)
+        # Write the modified compose file
+        with open(self.compose_file, "w") as f:
+            yaml.dump(compose_data, f, default_flow_style=False, sort_keys=False)
+
+        if self.port_mappings:
+            console.print(
+                f"[dim]Created port mappings for {len(self.port_mappings)} service(s)[/dim]"
+            )
 
     def up(self):
         """Start Docker Compose services."""
-        cmd = ["docker", "compose", "-p", self.project_name, "-f", str(self.compose_file)]
+        # Use the new compose file with remapped ports
+        cmd = [
+            "docker",
+            "compose",
+            "-p",
+            self.project_name,
+            "-f",
+            str(self.compose_file),
+            "up",
+            "-d",
+        ]
 
-        if self.override_file.exists():
-            cmd.extend(["-f", str(self.override_file)])
-
-        cmd.extend(["up", "-d"])
-
+        console.print(f"  [dim]Starting services with project name: {self.project_name}[/dim]")
         subprocess.run(cmd, cwd=self.workspace_path, check=True)
 
     def down(self, volumes: bool = False):
         """Stop Docker Compose services."""
         # If compose file doesn't exist, try to stop by project name only
         if not self.compose_file.exists():
-            cmd = ["docker", "compose", "-p", self.project_name, "down"]
-            if volumes:
-                cmd.append("-v")
-            # Don't check return code as project might not exist
-            subprocess.run(cmd, cwd=self.workspace_path, capture_output=True)
+            console.print("[dim]Compose file not found, skipping Docker cleanup[/dim]")
             return
 
-        cmd = ["docker", "compose", "-p", self.project_name, "-f", str(self.compose_file)]
-
-        if self.override_file.exists():
-            cmd.extend(["-f", str(self.override_file)])
-
-        cmd.append("down")
+        cmd = ["docker", "compose", "-p", self.project_name, "-f", str(self.compose_file), "down"]
 
         if volumes:
             cmd.append("-v")
@@ -179,23 +188,40 @@ class DockerComposeManager:
     def wait_for_service(self, service_name: str, timeout: int = 60):
         """Wait for a service to be healthy."""
         client = docker.from_env()
-        container_name = f"{self.project_name}_{service_name}_1"
+        # Docker Compose v2 uses hyphens instead of underscores
+        container_name = f"{self.project_name}-{service_name}-1"
 
         start_time = time.time()
         while time.time() - start_time < timeout:
             try:
                 container = client.containers.get(container_name)
                 if container.status == "running":
-                    # Check if service has health check
-                    if "Health" in container.attrs["State"]:
-                        health = container.attrs["State"]["Health"]["Status"]
-                        if health == "healthy":
+                    # Check if service has health check configured
+                    state = container.attrs.get("State", {})
+                    if "Health" in state and state["Health"] is not None:
+                        # Has health check, wait for it to be healthy
+                        health_status = state["Health"].get("Status", "unknown")
+                        if health_status == "healthy":
                             return
+                        # If unhealthy or starting, continue waiting
                     else:
-                        # No health check, just check if running
+                        # No health check configured, running is enough
                         return
             except docker.errors.NotFound:
-                pass
+                # Try to find containers with similar names for debugging
+                containers = client.containers.list(
+                    filters={"label": f"com.docker.compose.project={self.project_name}"}
+                )
+                if not containers and time.time() - start_time > 5:
+                    # After 5 seconds, show available containers for debugging
+                    all_containers = [c.name for c in client.containers.list()]
+                    console.print(
+                        f"[yellow]Warning: Container '{container_name}' not found.[/yellow]"
+                    )
+                    console.print(
+                        f"[dim]Available containers: {', '.join(all_containers) if all_containers else 'none'}[/dim]"
+                    )
+                    break
 
             time.sleep(1)
 

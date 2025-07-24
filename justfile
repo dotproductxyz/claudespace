@@ -34,6 +34,21 @@ clean:
 dev:
     uv run claudespace --help
 
-install: clean build
-    uv tool uninstall claudespace
+uninstall:
+    -uv tool uninstall claudespace
+
+install: uninstall clean build
+    #!/bin/bash
+    # Backup original
+    cp pyproject.toml pyproject.toml.bak
+
+    # Add timestamp to version
+    timestamp=$(date +%s)
+    sed -i "" "s/version = \"\([^\"]*\)\"/version = \"\1.dev$timestamp\"/" pyproject.toml
+
+    # Build and install
+    uv build
     uv tool install . --force
+
+    # Restore original
+    mv pyproject.toml.bak pyproject.toml

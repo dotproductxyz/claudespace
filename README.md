@@ -84,6 +84,7 @@ claudespace attach feature-x
 - `claudespace destroy <name>` - Remove a workspace and its resources
 - `claudespace attach <name>` - Attach to Claude Code session in a workspace
 - `claudespace cursor <name>` - Open workspace in Cursor IDE
+- `claudespace push <name> <message>` - Push changes to branch `claude-<name>`
 
 ## Configuration
 
@@ -163,7 +164,6 @@ claudespace cursor feature-x -p frontend
 ```bash
 # You're working on a feature
 cd ~/myproject
-git checkout -b new-feature
 
 # Create isolated environment for Claude
 claudespace create new-feature
@@ -174,9 +174,11 @@ claudespace attach new-feature
 # Later, attach again (resumes existing conversation)
 claudespace attach new-feature
 
-# When done, review and merge Claude's changes
-cd ~/myproject
-git pull ~/claudespaces/new-feature new-feature
+# When Claude is done, push changes to a branch
+claudespace push new-feature "Implement feature X with Claude's help"
+
+# The changes are now on branch 'claude-new-feature'
+# You can create a PR from this branch
 
 # Clean up
 claudespace destroy new-feature
@@ -188,9 +190,13 @@ claudespace destroy new-feature
 - Docker and Docker Compose
 - Git
 
+## Known Limitations
+
+**Large Repository Performance**: Claudespace currently creates a shallow clone of your git repository for each workspace. While this works well for most projects, it may be slow and consume significant disk space for very large repositories. Future versions may use [git worktrees](https://git-scm.com/docs/git-worktree) as an alternative approach for better performance.
+
 ## About This Project
 
-This project was built entirely with Claude Code through an iterative, exploratory development process. It's designed to solve the specific workflow needs at Operator, but you're encouraged to fork and adapt it to match your own development setup and requirements.
+This project was vide coded with Claude Code. It's designed to solve the specific workflow needs at [Operator](https://operator.xyz), but you're encouraged to fork and adapt it to match your own development setup and requirements.
 
 ## License
 

@@ -61,7 +61,8 @@ def find_config_file(explicit_path: str | None = None) -> Path | None:
 @click.argument("name")
 @click.option("--config", "-c", help="Path to config file")
 @click.option("--base-dir", default="~/claudespaces", help="Base directory for workspaces")
-def create(name: str, config: str | None, base_dir: str):
+@click.option("--verbose", "-v", is_flag=True, help="Show detailed command output")
+def create(name: str, config: str | None, base_dir: str, verbose: bool):
     """Create a new isolated workspace."""
     try:
         config_path = find_config_file(config)
@@ -80,15 +81,14 @@ def create(name: str, config: str | None, base_dir: str):
         workspace_config = load_config(config_path)
         manager = WorkspaceManager(Path(base_dir).expanduser())
 
-        with console.status(f"Creating workspace '{name}'..."):
-            workspace = manager.create_workspace(name, workspace_config)
+        console.print(f"[bold]Creating workspace '{name}'[/bold]")
+        workspace = manager.create_workspace(name, workspace_config, verbose=verbose)
 
         console.print(f"[green]✓ Created workspace:[/green] {workspace.path}")
         console.print(f"[green]✓ Docker project:[/green] claude_{name}")
         console.print(f"[green]✓ Config loaded from:[/green] {config_path}")
         console.print("\n[bold]Next steps:[/bold]")
-        console.print(f"  cd {workspace.path}")
-        console.print("  claude-code")
+        console.print(f"  claudespace attach {name}")
 
     except WorkspaceExistsError as e:
         console.print(f"[yellow]{e}[/yellow]")
@@ -122,10 +122,61 @@ def list_workspaces(base_dir: str):
     table.add_column("Status", style="green")
 
     for ws in workspaces:
-        status = "🟢 Running" if ws.is_running() else "⚪ Stopped"
+        status = "🟢 Running" if ws.is_running() else "🔴 Stopped"
         table.add_row(ws.name, str(ws.path), status)
 
     console.print(table)
+
+
+@main.command()
+@click.argument("name")
+@click.argument("message")
+@click.option("--base-dir", default="~/claudespaces", help="Base directory for workspaces")
+def push(name: str, message: str, base_dir: str):
+    """Push workspace changes to a GitHub branch."""
+    manager = WorkspaceManager(Path(base_dir).expanduser())
+
+    try:
+        workspace = manager.get_workspace(name)
+        branch_name = f"claude-{name}"
+
+        console.print(
+            f"[bold]Pushing changes from workspace '{name}' to branch '{branch_name}'[/bold]"
+        )
+
+        # Change to workspace directory
+        os.chdir(workspace.path)
+
+        # Check if there are any changes
+        result = subprocess.run(["git", "status", "--porcelain"], capture_output=True, text=True)
+        if not result.stdout.strip():
+            console.print("[yellow]No changes to push[/yellow]")
+            return
+
+        # Create and checkout branch
+        subprocess.run(["git", "checkout", "-B", branch_name], check=True)
+
+        # Add all changes
+        subprocess.run(["git", "add", "-A"], check=True)
+
+        # Commit changes
+        subprocess.run(["git", "commit", "-m", message], check=True)
+
+        # Push to remote
+        subprocess.run(["git", "push", "-u", "origin", branch_name], check=True)
+
+        console.print(f"[green]✓ Pushed changes to branch '{branch_name}'[/green]")
+        console.print("[dim]You can create a pull request from this branch[/dim]")
+
+    except WorkspaceNotFoundError as e:
+        console.print(f"[red]Error: {e}[/red]")
+        raise click.Abort() from e
+    except subprocess.CalledProcessError as e:
+        console.print(f"[red]Error running git command: {e}[/red]")
+        raise click.Abort() from e
+    except Exception as e:
+        console.print(f"[red]Error pushing changes: {e}[/red]")
+        raise click.Abort() from e
 
 
 @main.command()
@@ -136,12 +187,19 @@ def destroy(name: str, base_dir: str, force: bool):
     """Destroy a workspace and its Docker resources."""
     manager = WorkspaceManager(Path(base_dir).expanduser())
 
+    # Check if workspace exists first
+    try:
+        manager.get_workspace(name)
+    except WorkspaceNotFoundError as e:
+        console.print(f"[red]Error: {e}[/red]")
+        raise click.Abort() from e
+
     if not force and not click.confirm(f"Are you sure you want to destroy workspace '{name}'?"):
         return
 
     try:
-        with console.status(f"Destroying workspace '{name}'..."):
-            manager.destroy_workspace(name)
+        console.print(f"[bold]Destroying workspace '{name}'[/bold]")
+        manager.destroy_workspace(name)
         console.print(f"[green]✓ Destroyed workspace '{name}'[/green]")
     except WorkspaceNotFoundError as e:
         console.print(f"[red]Error: {e}[/red]")
@@ -160,6 +218,7 @@ def stop(name: str, base_dir: str):
 
     try:
         workspace = manager.get_workspace(name)
+        console.print(f"[bold]Stopping workspace '{name}'[/bold]")
         workspace.stop()
         console.print(f"[green]✓ Stopped workspace '{name}'[/green]")
     except WorkspaceNotFoundError as e:
@@ -179,6 +238,7 @@ def start(name: str, base_dir: str):
 
     try:
         workspace = manager.get_workspace(name)
+        console.print(f"[bold]Starting workspace '{name}'[/bold]")
         workspace.start()
         console.print(f"[green]✓ Started workspace '{name}'[/green]")
     except WorkspaceNotFoundError as e:
@@ -202,27 +262,33 @@ def attach(name: str, base_dir: str):
             console.print(f"[yellow]Starting Docker services for '{name}'...[/yellow]")
             workspace.start()
 
-        # Use workspace name as conversation ID for consistency
-        conversation_id = f"claudespace-{name}"
+        # Get the stored session ID for this workspace
+        session_id = manager.get_session_id(name)
 
-        # Always use --resume with the conversation ID
-        # Claude Code will create a new conversation if it doesn't exist
-        cmd = ["claude-code", "--resume", conversation_id]
+        if session_id:
+            # Resume the existing session
+            cmd = ["claude", "--resume", session_id]
+            console.print(f"[green]✓ Resuming Claude session for workspace '{name}'[/green]")
+            console.print(f"[dim]Session ID: {session_id}[/dim]")
+        else:
+            # No session found, start a new one
+            cmd = ["claude"]
+            console.print(f"[green]✓ Attaching to workspace '{name}'[/green]")
+            console.print("[dim]No saved session found, starting new conversation[/dim]")
 
-        console.print(f"[green]✓ Attaching to workspace '{name}'[/green]")
-        console.print(f"[dim]Conversation ID: {conversation_id}[/dim]")
+        console.print(f"[dim]Workspace: {workspace.path}[/dim]")
 
         # Change to workspace directory and run claude
         os.chdir(workspace.path)
-        os.execvp("claude-code", cmd)
+        os.execvp("claude", cmd)
 
     except WorkspaceNotFoundError as e:
         console.print(f"[red]Error: {e}[/red]")
         raise click.Abort() from e
     except FileNotFoundError:
-        console.print("[red]Error: 'claude-code' command not found[/red]")
+        console.print("[red]Error: 'claude' command not found[/red]")
         console.print(
-            "[dim]Please install Claude Code: https://docs.anthropic.com/claude-code[/dim]"
+            "[dim]Please install Claude CLI: https://docs.anthropic.com/en/docs/claude-code[/dim]"
         )
         raise click.Abort() from None
     except Exception as e:
