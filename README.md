@@ -13,11 +13,8 @@ Isolated Docker environments for Claude Code development. This tool allows you t
 ## Installation
 
 ```bash
-# Install with uv
-uv tool install claudespace
-
-# Or use directly with uvx
-uvx claudespace --help
+# Install via just
+just install
 ```
 
 ## Quick Start
@@ -77,8 +74,8 @@ claudespace attach feature-x
 
 ## Commands
 
-- `claudespace create <name>` - Create a new workspace
 - `claudespace list` - List all workspaces
+- `claudespace create <name>` - Create a new workspace
 - `claudespace start <name>` - Start a workspace's Docker services
 - `claudespace stop <name>` - Stop a workspace's Docker services
 - `claudespace destroy <name>` - Remove a workspace and its resources
@@ -130,18 +127,16 @@ services:
 2. **Isolate**: Generates unique ports for Docker services (starting from port 15000)
 3. **Configure**: Updates environment files with new ports
 4. **Initialize**: Runs your install commands
-5. **Launch**: Starts Docker services with the new configuration
+5. **Launch**: Starts Docker services with the new configuration and create a Claude Code session
 6. **Ready**: Claude Code can now work in the isolated environment
 
 ## Claude Code Integration
 
-Each workspace has a persistent conversation ID based on its name. The `attach` command automatically creates or resumes the conversation:
+Each workspace maintains a persistent conversation tied to its name. The `attach` command automatically resumes your workspace conversation:
 
 ```bash
-# Attach to a workspace (creates/resumes automatically)
+# Attach to a workspace
 claudespace attach feature-x
-
-# The conversation ID is: claudespace-feature-x
 ```
 
 ## Cursor IDE Integration
@@ -186,7 +181,7 @@ claudespace destroy new-feature
 
 ## Requirements
 
-- Python 3.11+
+- Python 3.13+
 - Docker and Docker Compose
 - Git
 

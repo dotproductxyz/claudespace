@@ -18,7 +18,6 @@ typecheck:
 # Run both lint and typecheck
 check: lint typecheck
 
-
 # Build package
 build:
     uv build
@@ -34,9 +33,11 @@ clean:
 dev:
     uv run claudespace --help
 
+# Uninstall claudespace
 uninstall:
     -uv tool uninstall claudespace
 
+# Install claudespace
 install: uninstall clean build
     #!/bin/bash
     # Backup original
