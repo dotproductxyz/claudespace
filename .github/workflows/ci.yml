@@ -1,0 +1,36 @@
+name: claudespace
+
+on:
+  push:
+    branches: [ main ]
+  pull_request:
+
+jobs:
+  check:
+    runs-on: ubuntu-latest
+    
+    steps:
+    - uses: actions/checkout@v4
+    
+    - name: Install uv
+      uses: astral-sh/setup-uv@v4
+      with:
+        enable-cache: true
+    
+    - name: Install Just
+      uses: extractions/setup-just@v2
+      with:
+        just-version: 1.25.2
+    
+    - name: Set up Python 3.13
+      run: |
+        uv python install 3.13
+        uv python pin 3.13
+    
+    - name: Install dependencies
+      run: |
+        uv sync --dev
+    
+    - name: Run checks (lint and typecheck)
+      run: |
+        just check
