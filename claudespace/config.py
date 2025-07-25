@@ -2,11 +2,13 @@
 
 from dataclasses import dataclass
 from pathlib import Path
-from typing import cast
+from typing import Literal, cast
 
 import yaml
 
 from .exceptions import ConfigError
+
+CloneStrategy = Literal["worktree", "shallow", "full"]
 
 
 @dataclass
@@ -49,6 +51,7 @@ class WorkspaceConfig:
     env_files: list[str]
     branch: str = "main"
     clone_depth: int = 1
+    clone_strategy: CloneStrategy = "worktree"
 
 
 def load_config(config_path: Path) -> WorkspaceConfig:
@@ -73,6 +76,13 @@ def load_config(config_path: Path) -> WorkspaceConfig:
 
     branch = setup.get("branch", "main")
     clone_depth = setup.get("clone_depth", 1)
+    clone_strategy = setup.get("clone_strategy", "worktree")
+
+    # Validate clone strategy
+    if clone_strategy not in ["worktree", "shallow", "full"]:
+        raise ConfigError(
+            f"Invalid clone_strategy: {clone_strategy}. Must be 'worktree', 'shallow', or 'full'"
+        )
 
     # Parse install commands
     install_commands: list[SetupCommand] = []
@@ -135,4 +145,5 @@ def load_config(config_path: Path) -> WorkspaceConfig:
         env_files=env_files,
         branch=branch,
         clone_depth=clone_depth,
+        clone_strategy=clone_strategy,
     )
