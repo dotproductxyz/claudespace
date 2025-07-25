@@ -44,7 +44,27 @@ class Workspace:
         console.print("[dim]Stopping Docker services and removing volumes...[/dim]")
         compose = DockerComposeManager(self.path, f"claude_{self.name}")
         compose.down(volumes=True)
+
+        # Check if this is a worktree
+        is_worktree = False
         if self.path.exists():
+            git_file = self.path / ".git"
+            # .git is a file in worktrees, not a directory
+            is_worktree = git_file.exists() and git_file.is_file()
+
+        if is_worktree:
+            console.print(f"[dim]Removing git worktree: {self.path}[/dim]")
+            # Remove the worktree
+            subprocess.run(
+                ["git", "worktree", "remove", str(self.path), "--force"],
+                capture_output=True,
+                text=True,
+            )
+            # Also remove the branch
+            branch_name = f"claude-{self.name}"
+            console.print(f"[dim]Removing branch: {branch_name}[/dim]")
+            subprocess.run(["git", "branch", "-D", branch_name], capture_output=True, text=True)
+        elif self.path.exists():
             console.print(f"[dim]Removing workspace directory: {self.path}[/dim]")
             shutil.rmtree(self.path)
 
@@ -70,9 +90,14 @@ class WorkspaceManager:
                 f"Workspace '{name}' already exists. Use 'claudespace attach {name}' to connect to it."
             )
 
-        # Clone repository
-        console.print(f"[dim]Cloning repository from {config.git_url}...[/dim]")
-        self._clone_repository(config, workspace_path, verbose)
+        # Set up repository based on clone strategy
+        if config.clone_strategy == "worktree":
+            console.print(f"[dim]Creating git worktree at {workspace_path}...[/dim]")
+            self._setup_worktree(config, workspace_path, name, verbose)
+        else:
+            clone_type = "shallow" if config.clone_strategy == "shallow" else "full"
+            console.print(f"[dim]Cloning repository ({clone_type}) from {config.git_url}...[/dim]")
+            self._clone_repository(config, workspace_path, name, verbose)
 
         # Create Docker Compose with remapped ports
         console.print("[dim]Creating Docker Compose with unique ports...[/dim]")
@@ -145,11 +170,14 @@ class WorkspaceManager:
             del self.sessions[name]
             self._save_sessions()
 
-    def _clone_repository(self, config: WorkspaceConfig, dest: Path, verbose: bool = False):
-        """Clone the repository."""
+    def _clone_repository(
+        self, config: WorkspaceConfig, dest: Path, workspace_name: str, verbose: bool = False
+    ):
+        """Clone the repository and create a feature branch."""
         cmd = ["git", "clone"]
-        if config.clone_depth > 0:
-            cmd.extend(["--depth", str(config.clone_depth)])
+        # Only add depth for shallow clones
+        if config.clone_strategy == "shallow":
+            cmd.extend(["--depth", "1"])
         if config.branch != "main":
             cmd.extend(["-b", config.branch])
         cmd.extend([config.git_url, str(dest)])
@@ -159,6 +187,14 @@ class WorkspaceManager:
                 subprocess.run(cmd, check=True, text=True)
             else:
                 subprocess.run(cmd, check=True, capture_output=True, text=True)
+
+            # Create and checkout feature branch after cloning
+            branch_name = f"claude-{workspace_name}"
+            checkout_cmd = ["git", "checkout", "-b", branch_name]
+            if verbose:
+                subprocess.run(checkout_cmd, cwd=dest, check=True, text=True)
+            else:
+                subprocess.run(checkout_cmd, cwd=dest, check=True, capture_output=True, text=True)
         except subprocess.CalledProcessError as e:
             error_msg = e.stderr.strip() if not verbose else f"Exit code {e.returncode}"
             if "Repository not found" in error_msg:
@@ -173,6 +209,39 @@ class WorkspaceManager:
                 ) from e
             else:
                 raise ClaudespaceError(f"Git clone failed: {error_msg}") from e
+
+    def _setup_worktree(
+        self, config: WorkspaceConfig, dest: Path, workspace_name: str, verbose: bool = False
+    ):
+        """Create a git worktree instead of cloning."""
+        # Check if we're in a git repository
+        try:
+            subprocess.run(
+                ["git", "rev-parse", "--show-toplevel"], capture_output=True, text=True, check=True
+            )
+        except subprocess.CalledProcessError as e:
+            raise ClaudespaceError(
+                "Not in a git repository. Use 'clone_strategy: shallow' or 'clone_strategy: full' instead of 'worktree'."
+            ) from e
+
+        # Create worktree with a new branch from the configured base branch
+        branch_name = f"claude-{workspace_name}"
+        base_branch = config.branch  # This defaults to "main" in the config
+        cmd = ["git", "worktree", "add", "-b", branch_name, str(dest), base_branch]
+
+        try:
+            if verbose:
+                subprocess.run(cmd, check=True, text=True)
+            else:
+                subprocess.run(cmd, check=True, capture_output=True, text=True)
+        except subprocess.CalledProcessError as e:
+            error_msg = e.stderr.strip() if not verbose else f"Exit code {e.returncode}"
+            if "already exists" in error_msg:
+                raise ClaudespaceError(
+                    f"Branch '{branch_name}' already exists. Remove it first with: git branch -D {branch_name}"
+                ) from e
+            else:
+                raise ClaudespaceError(f"Failed to create worktree: {error_msg}") from e
 
     def _update_env_files(
         self,

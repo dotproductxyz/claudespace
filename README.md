@@ -27,7 +27,7 @@ version: 1
 setup:
   git_url: "https://github.com/yourcompany/yourproject.git"
   branch: "main"
-  clone_depth: 1  # Shallow clone for speed
+  clone_strategy: "worktree"  # Default: uses git worktree for fast setup
   
   install:
     - name: "Install backend dependencies"
@@ -89,7 +89,10 @@ claudespace attach feature-x
 
 - `git_url` (required): Repository to clone
 - `branch`: Branch to checkout (default: "main")
-- `clone_depth`: Git clone depth, 0 for full history (default: 1)
+- `clone_strategy`: How to set up the repository (default: "worktree")
+  - `"worktree"`: Uses git worktree for instant setup (requires running from within a git repo)
+  - `"shallow"`: Shallow clone with depth 1 (fast download, limited history)
+  - `"full"`: Full clone with complete history
 - `install`: Commands to run after cloning
 - `post_start`: Commands to run after Docker services start
 
@@ -123,12 +126,22 @@ services:
 
 ## How It Works
 
-1. **Clone**: Creates a fresh clone of your repository
+1. **Setup Repository**: 
+   - With `worktree` (default): Creates a git worktree instantly from your local repo
+   - With `shallow`/`full`: Clones from the remote repository
 2. **Isolate**: Generates unique ports for Docker services (starting from port 15000)
 3. **Configure**: Updates environment files with new ports
 4. **Initialize**: Runs your install commands
 5. **Launch**: Starts Docker services with the new configuration and create a Claude Code session
 6. **Ready**: Claude Code can now work in the isolated environment
+
+### Git Worktree Benefits
+
+When using the default `worktree` strategy:
+- **Instant creation**: No network operations needed
+- **Shared git objects**: All worktrees share the same git history
+- **Disk efficient**: Each worktree only takes ~100KB vs full clones
+- **Perfect for local development**: Changes are immediately visible across all worktrees
 
 ## Claude Code Integration
 
@@ -184,10 +197,6 @@ claudespace destroy new-feature
 - Python 3.13+
 - Docker and Docker Compose
 - Git
-
-## Known Limitations
-
-**Large Repository Performance**: Claudespace currently creates a shallow clone of your git repository for each workspace. While this works well for most projects, it may be slow and consume significant disk space for very large repositories. Future versions may use [git worktrees](https://git-scm.com/docs/git-worktree) as an alternative approach for better performance.
 
 ## About This Project
 
