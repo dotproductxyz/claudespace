@@ -224,13 +224,10 @@ class WorkspaceManager:
                 "Not in a git repository. Use 'clone_strategy: shallow' or 'clone_strategy: full' instead of 'worktree'."
             ) from e
 
-        # Create worktree with a new branch
+        # Create worktree with a new branch from the configured base branch
         branch_name = f"claude-{workspace_name}"
-        cmd = ["git", "worktree", "add", "-b", branch_name, str(dest)]
-
-        # If a specific branch was requested, create from that branch
-        if config.branch != "main":
-            cmd.append(config.branch)
+        base_branch = config.branch  # This defaults to "main" in the config
+        cmd = ["git", "worktree", "add", "-b", branch_name, str(dest), base_branch]
 
         try:
             if verbose:
