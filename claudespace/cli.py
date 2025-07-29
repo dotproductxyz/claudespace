@@ -295,15 +295,7 @@ def attach(name: str, base_dir: str):
         console.print(f"[red]Error attaching to workspace: {e}[/red]")
         raise click.Abort() from e
 
-
-@main.command()
-@click.argument("name")
-@click.option("--path", "-p", help="Subdirectory to open (e.g., './backend')")
-@click.option("--base-dir", default="~/claudespaces", help="Base directory for workspaces")
-def cursor(name: str, path: str | None, base_dir: str):
-    """Open a workspace in Cursor IDE."""
-    manager = WorkspaceManager(Path(base_dir).expanduser())
-
+def _open_workspace_path(manager, name, path, editor_cmd):
     try:
         workspace = manager.get_workspace(name)
 
@@ -325,24 +317,46 @@ def cursor(name: str, path: str | None, base_dir: str):
         else:
             target_path = workspace.path
 
-        # Launch Cursor with the target path
+        # Launch editor with the target path
         try:
-            subprocess.run(["cursor", str(target_path)], check=True)
-            console.print(f"[green]✓ Opened Cursor with:[/green] {target_path}")
+            subprocess.run([editor_cmd, str(target_path)], check=True)
+            console.print(f"[green]✓ Opened {editor_cmd} with:[/green] {target_path}")
         except FileNotFoundError:
-            console.print("[red]Error: 'cursor' command not found[/red]")
-            console.print("[dim]Please ensure Cursor is installed and available in your PATH[/dim]")
-            console.print(
-                "[dim]You can install the Cursor CLI from: Cursor > Install 'cursor' command[/dim]"
-            )
+            console.print(f"[red]Error: '{editor_cmd}' command not found[/red]")
+            console.print(f"[dim]Please ensure {editor_cmd} is installed and available in your PATH[/dim]")
+            if editor_cmd == "cursor":
+                console.print(
+                    "[dim]You can install the Cursor CLI from: Cursor > Install 'cursor' command[/dim]"
+                )
             raise click.Abort() from None
         except subprocess.CalledProcessError as e:
-            console.print(f"[red]Error launching Cursor: {e}[/red]")
+            console.print(f"[red]Error launching {editor_cmd}: {e}[/red]")
             raise click.Abort() from e
 
     except WorkspaceNotFoundError as e:
         console.print(f"[red]Error: {e}[/red]")
         raise click.Abort() from e
+
+
+@main.command()
+@click.argument("name")
+@click.option("--path", "-p", help="Subdirectory to open (e.g., './backend')")
+@click.option("--base-dir", default="~/claudespaces", help="Base directory for workspaces")
+def cursor(name: str, path: str | None, base_dir: str):
+    """Open a workspace in Cursor IDE."""
+    manager = WorkspaceManager(Path(base_dir).expanduser())
+    _open_workspace_path(manager, name, path, "cursor")
+
+
+@main.command()
+@click.argument("name")
+@click.option("--path", "-p", help="Subdirectory to open (e.g., './backend')")
+@click.option("--base-dir", default="~/claudespaces", help="Base directory for workspaces")
+def editor(name: str, path: str | None, base_dir: str):
+    """Open a workspace in your default editor ($EDITOR)."""
+    editor_cmd = os.environ.get("EDITOR", "vim")
+    manager = WorkspaceManager(Path(base_dir).expanduser())
+    _open_workspace_path(manager, name, path, editor_cmd)
 
 
 @main.command()
