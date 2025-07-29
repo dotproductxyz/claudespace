@@ -345,5 +345,108 @@ def cursor(name: str, path: str | None, base_dir: str):
         raise click.Abort() from e
 
 
+@main.command()
+@click.argument("name")
+@click.option("--base-dir", default="~/claudespaces", help="Base directory for workspaces")
+def pwd(name: str, base_dir: str):
+    """Print the path to a workspace."""
+    manager = WorkspaceManager(Path(base_dir).expanduser())
+
+    try:
+        workspace = manager.get_workspace(name)
+
+        # Just print the path
+        console.print(str(workspace.path))
+
+    except WorkspaceNotFoundError as e:
+        console.print(f"[red]Error: {e}[/red]")
+        raise click.Abort() from e
+
+
+@main.command()
+@click.argument("name")
+@click.option("--base-dir", default="~/claudespaces", help="Base directory for workspaces")
+@click.option("--stash", is_flag=True, help="Stash local changes before pulling")
+def pull(name: str, base_dir: str, stash: bool):
+    """Pull changes from upstream origin branch."""
+    manager = WorkspaceManager(Path(base_dir).expanduser())
+
+    try:
+        workspace = manager.get_workspace(name)
+        branch_name = f"claude-{name}"
+
+        console.print(f"[bold]Pulling changes from origin/{branch_name}[/bold]")
+
+        # Change to workspace directory
+        os.chdir(workspace.path)
+
+        # Check for uncommitted changes
+        status_result = subprocess.run(
+            ["git", "status", "--porcelain"], capture_output=True, text=True, check=True
+        )
+        has_changes = bool(status_result.stdout.strip())
+
+        if has_changes:
+            if stash:
+                console.print("[yellow]Stashing local changes...[/yellow]")
+                subprocess.run(
+                    ["git", "stash", "push", "-m", f"claudespace pull on {branch_name}"], check=True
+                )
+            else:
+                console.print("[red]Error: You have uncommitted changes.[/red]")
+                console.print("[dim]Options:[/dim]")
+                console.print(
+                    "[dim]  1. Commit your changes: claudespace push <name> <message>[/dim]"
+                )
+                console.print("[dim]  2. Stash and pull: claudespace pull <name> --stash[/dim]")
+                console.print(
+                    "[dim]  3. Discard changes: git reset --hard (in workspace directory)[/dim]"
+                )
+                raise click.Abort()
+
+        # Make sure we're on the correct branch
+        current_branch = subprocess.run(
+            ["git", "rev-parse", "--abbrev-ref", "HEAD"], capture_output=True, text=True, check=True
+        ).stdout.strip()
+
+        if current_branch != branch_name:
+            console.print(f"[yellow]Switching to branch '{branch_name}'...[/yellow]")
+            subprocess.run(["git", "checkout", branch_name], check=True)
+
+        # Pull changes from origin
+        result = subprocess.run(
+            ["git", "pull", "origin", branch_name], capture_output=True, text=True
+        )
+
+        if result.returncode == 0:
+            console.print(f"[green]✓ Successfully pulled changes from origin/{branch_name}[/green]")
+            if "Already up to date" in result.stdout:
+                console.print("[dim]No new changes to pull[/dim]")
+            else:
+                # Show a summary of what was pulled
+                console.print(result.stdout.strip())
+
+            # If we stashed, offer to pop the stash
+            if has_changes and stash:
+                console.print("\n[yellow]Your changes were stashed. To restore them:[/yellow]")
+                console.print(f"[dim]  cd {workspace.path} && git stash pop[/dim]")
+        else:
+            console.print(f"[red]Error pulling changes: {result.stderr}[/red]")
+            if has_changes and stash:
+                console.print("[yellow]Restoring stashed changes...[/yellow]")
+                subprocess.run(["git", "stash", "pop"], capture_output=True)
+            raise click.Abort()
+
+    except WorkspaceNotFoundError as e:
+        console.print(f"[red]Error: {e}[/red]")
+        raise click.Abort() from e
+    except subprocess.CalledProcessError as e:
+        console.print(f"[red]Error running git command: {e}[/red]")
+        raise click.Abort() from e
+    except Exception as e:
+        console.print(f"[red]Error pulling changes: {e}[/red]")
+        raise click.Abort() from e
+
+
 if __name__ == "__main__":
     main()

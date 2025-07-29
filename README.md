@@ -74,14 +74,23 @@ claudespace attach feature-x
 
 ## Commands
 
-- `claudespace list` - List all workspaces
+### Workspace Management
 - `claudespace create <name>` - Create a new workspace
+- `claudespace list` - List all workspaces
+- `claudespace destroy <name>` - Remove a workspace and its resources
+- `claudespace pwd <name>` - Print the path to a workspace
+
+### Docker Services
 - `claudespace start <name>` - Start a workspace's Docker services
 - `claudespace stop <name>` - Stop a workspace's Docker services
-- `claudespace destroy <name>` - Remove a workspace and its resources
+
+### Development
 - `claudespace attach <name>` - Attach to Claude Code session in a workspace
 - `claudespace cursor <name>` - Open workspace in Cursor IDE
+
+### Git Collaboration
 - `claudespace push <name> <message>` - Push changes to branch `claude-<name>`
+- `claudespace pull <name>` - Pull changes from origin/claude-<name> branch (use --stash to stash local changes)
 
 ## Configuration
 
