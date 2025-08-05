@@ -158,7 +158,7 @@ class WorkspaceManager:
 
             return Workspace(name, workspace_path, config)
 
-        except Exception:
+        except Exception as e:
             # Clean up any resources that were created
             console.print("[yellow]Cleaning up resources...[/yellow]")
             self._cleanup_failed_workspace(name, workspace_path, resources_created, verbose)
