@@ -1,7 +1,6 @@
 #!/usr/bin/env python3
 """Main CLI interface for claudespace."""
 
-import json
 import os
 import subprocess
 from pathlib import Path
@@ -326,53 +325,6 @@ def attach(name: str, base_dir: str):
         raise click.Abort() from e
 
 
-def _configure_cursor_python_env(workspace_path: Path):
-    """Configure Cursor to use the backend venv if it exists."""
-    # Check for common venv locations in the backend directory
-    backend_path = workspace_path / "backend"
-    if not backend_path.exists():
-        return
-
-    # Look for .venv directory
-    venv_path = backend_path / ".venv"
-
-    python_interpreter = None
-    if venv_path.exists() and venv_path.is_dir():
-        # Check for Python executable (Unix-like systems only)
-        python_candidate = venv_path / "bin" / "python"
-        if python_candidate.exists():
-            python_interpreter = str(python_candidate)
-
-    if not python_interpreter:
-        return
-
-    # Create .vscode directory if it doesn't exist
-    vscode_dir = workspace_path / ".vscode"
-    vscode_dir.mkdir(exist_ok=True)
-
-    # Create/update settings.json
-    settings_file = vscode_dir / "settings.json"
-    settings = {}
-
-    if settings_file.exists():
-        try:
-            with open(settings_file) as f:
-                settings = json.load(f)
-        except (json.JSONDecodeError, OSError):
-            settings = {}
-
-    # Set the Python interpreter path
-    settings["python.defaultInterpreterPath"] = python_interpreter
-
-    # Write settings back
-    try:
-        with open(settings_file, "w") as f:
-            json.dump(settings, f, indent=2)
-        console.print(f"[dim]✓ Configured Cursor to use Python venv: {python_interpreter}[/dim]")
-    except OSError as e:
-        console.print(f"[yellow]Warning: Could not configure Python interpreter: {e}[/yellow]")
-
-
 def _open_workspace_path(manager, name, path, editor_cmd):
     try:
         workspace = manager.get_workspace(name)
@@ -394,10 +346,6 @@ def _open_workspace_path(manager, name, path, editor_cmd):
                 raise click.Abort()
         else:
             target_path = workspace.path
-
-        # Special handling for Cursor: configure Python venv if backend exists
-        if editor_cmd == "cursor":
-            _configure_cursor_python_env(workspace.path)
 
         # Launch editor with the target path
         try:
