@@ -1,5 +1,6 @@
 """Workspace management for claudespace."""
 
+import contextlib
 import json
 import os
 import shutil
@@ -80,7 +81,7 @@ class WorkspaceManager:
         self._load_sessions()
 
     def create_workspace(
-        self, name: str, config: WorkspaceConfig, verbose: bool = False
+        self, name: str, config: WorkspaceConfig, config_path: Path, verbose: bool = False
     ) -> Workspace:
         """Create a new workspace."""
         workspace_path = self.base_dir / name
@@ -90,50 +91,78 @@ class WorkspaceManager:
                 f"Workspace '{name}' already exists. Use 'claudespace attach {name}' to connect to it."
             )
 
-        # Set up repository based on clone strategy
-        if config.clone_strategy == "worktree":
-            console.print(f"[dim]Creating git worktree at {workspace_path}...[/dim]")
-            self._setup_worktree(config, workspace_path, name, verbose)
-        else:
-            clone_type = "shallow" if config.clone_strategy == "shallow" else "full"
-            console.print(f"[dim]Cloning repository ({clone_type}) from {config.git_url}...[/dim]")
-            self._clone_repository(config, workspace_path, name, verbose)
+        # Track resources created for cleanup on failure
+        resources_created = {
+            "workspace_dir": False,
+            "git_worktree": False,
+            "docker_started": False,
+            "session_created": False,
+        }
 
-        # Create Docker Compose with remapped ports
-        console.print("[dim]Creating Docker Compose with unique ports...[/dim]")
-        compose = DockerComposeManager(workspace_path, f"claude_{name}")
-        compose.create_remapped_compose(config.services)
+        try:
+            # Set up repository based on clone strategy
+            if config.clone_strategy == "worktree":
+                console.print(f"[dim]Creating git worktree at {workspace_path}...[/dim]")
+                self._setup_worktree(config, workspace_path, name, verbose)
+                resources_created["git_worktree"] = True
+                resources_created["workspace_dir"] = True
+            else:
+                clone_type = "shallow" if config.clone_strategy == "shallow" else "full"
+                console.print(
+                    f"[dim]Cloning repository ({clone_type}) from {config.git_url}...[/dim]"
+                )
+                self._clone_repository(config, workspace_path, name, verbose)
+                resources_created["workspace_dir"] = True
 
-        # Update environment files
-        if config.env_files:
-            console.print(f"[dim]Updating environment files: {', '.join(config.env_files)}[/dim]")
-        self._update_env_files(workspace_path, config, compose.port_mappings)
+            # Copy env files from root directory to workspace
+            root_dir = config_path.parent
+            self._copy_env_files(root_dir, workspace_path, config.env_files)
 
-        # Run install commands
-        if config.install_commands:
-            console.print(
-                f"[dim]Running {len(config.install_commands)} install command(s)...[/dim]"
-            )
-        self._run_commands(workspace_path, config.install_commands, verbose=verbose)
+            # Create Docker Compose with remapped ports
+            console.print("[dim]Creating Docker Compose with unique ports...[/dim]")
+            compose = DockerComposeManager(workspace_path, f"claude_{name}")
+            compose.create_remapped_compose(config.services)
 
-        # Start Docker services
-        console.print("[dim]Starting Docker services...[/dim]")
-        compose.up()
+            # Update environment files
+            if config.env_files:
+                console.print(
+                    f"[dim]Updating environment files: {', '.join(config.env_files)}[/dim]"
+                )
+            self._update_env_files(workspace_path, config, compose.port_mappings)
 
-        # Run post-start commands
-        if config.post_start_commands:
-            console.print(
-                f"[dim]Running {len(config.post_start_commands)} post-start command(s)...[/dim]"
-            )
-        self._run_commands(workspace_path, config.post_start_commands, compose, verbose=verbose)
+            # Run install commands
+            if config.install_commands:
+                console.print(
+                    f"[dim]Running {len(config.install_commands)} install command(s)...[/dim]"
+                )
+            self._run_commands(workspace_path, config.install_commands, verbose=verbose)
 
-        # Start a Claude session for this workspace
-        console.print("[dim]Initializing Claude session...[/dim]")
-        session_id = self.start_claude_session(workspace_path)
-        if session_id:
-            self.set_session_id(name, session_id)
+            # Start Docker services
+            console.print("[dim]Starting Docker services...[/dim]")
+            compose.up()
+            resources_created["docker_started"] = True
 
-        return Workspace(name, workspace_path, config)
+            # Run post-start commands
+            if config.post_start_commands:
+                console.print(
+                    f"[dim]Running {len(config.post_start_commands)} post-start command(s)...[/dim]"
+                )
+            self._run_commands(workspace_path, config.post_start_commands, compose, verbose=verbose)
+
+            # Start a Claude session for this workspace
+            console.print("[dim]Initializing Claude session...[/dim]")
+            session_id = self.start_claude_session(workspace_path)
+            if session_id:
+                self.set_session_id(name, session_id)
+                resources_created["session_created"] = True
+
+            return Workspace(name, workspace_path, config)
+
+        except Exception as e:
+            # Clean up any resources that were created
+            console.print("[yellow]Cleaning up resources...[/yellow]")
+            self._cleanup_failed_workspace(name, workspace_path, resources_created, verbose)
+            raise
 
     def get_workspace(self, name: str) -> Workspace:
         """Get an existing workspace."""
@@ -242,6 +271,23 @@ class WorkspaceManager:
                 ) from e
             else:
                 raise ClaudespaceError(f"Failed to create worktree: {error_msg}") from e
+
+    def _copy_env_files(self, root_dir: Path, workspace_path: Path, env_files: list[str]):
+        """Copy env files from the root directory to the workspace."""
+        for env_file in env_files:
+            src_path = root_dir / env_file
+            dest_path = workspace_path / env_file
+
+            if src_path.exists():
+                console.print(f"[dim]Copying {env_file} to workspace...[/dim]")
+                # Create parent directories if needed
+                dest_path.parent.mkdir(parents=True, exist_ok=True)
+                shutil.copy2(src_path, dest_path)
+            else:
+                raise ClaudespaceError(
+                    f"Environment file '{env_file}' not found in {root_dir}. "
+                    f"Please create the file before creating a workspace."
+                )
 
     def _update_env_files(
         self,
@@ -395,3 +441,66 @@ class WorkspaceManager:
         except (subprocess.CalledProcessError, json.JSONDecodeError, KeyError) as e:
             console.print(f"[yellow]Warning: Could not create Claude session: {e}[/yellow]")
             return None
+
+    def _cleanup_failed_workspace(
+        self,
+        name: str,
+        workspace_path: Path,
+        resources_created: dict[str, bool],
+        verbose: bool = False,
+    ):
+        """Clean up resources after a failed workspace creation."""
+        # Clean up session if created
+        if resources_created.get("session_created") and name in self.sessions:
+            console.print("[dim]Removing Claude session...[/dim]")
+            del self.sessions[name]
+            self._save_sessions()
+
+        # Stop Docker services if started
+        if resources_created.get("docker_started"):
+            console.print("[dim]Stopping Docker services...[/dim]")
+            try:
+                compose = DockerComposeManager(workspace_path, f"claude_{name}")
+                compose.down(volumes=True)
+            except Exception as e:
+                console.print(f"[yellow]Warning: Failed to stop Docker services: {e}[/yellow]")
+
+        # Clean up workspace directory and git resources
+        if resources_created.get("workspace_dir") and workspace_path.exists():
+            if resources_created.get("git_worktree"):
+                # This is a worktree, remove it properly
+                console.print("[dim]Removing git worktree...[/dim]")
+                try:
+                    subprocess.run(
+                        ["git", "worktree", "remove", str(workspace_path), "--force"],
+                        capture_output=True,
+                        text=True,
+                        check=True,
+                    )
+                except subprocess.CalledProcessError as e:
+                    console.print(f"[yellow]Warning: Failed to remove worktree: {e}[/yellow]")
+                    # Try to remove directory anyway
+                    with contextlib.suppress(Exception):
+                        shutil.rmtree(workspace_path)
+
+                # Remove the branch
+                branch_name = f"claude-{name}"
+                console.print(f"[dim]Removing branch: {branch_name}[/dim]")
+                try:
+                    subprocess.run(
+                        ["git", "branch", "-D", branch_name],
+                        capture_output=True,
+                        text=True,
+                        check=True,
+                    )
+                except subprocess.CalledProcessError as e:
+                    console.print(f"[yellow]Warning: Failed to remove branch: {e}[/yellow]")
+            else:
+                # Regular directory, just remove it
+                console.print("[dim]Removing workspace directory...[/dim]")
+                try:
+                    shutil.rmtree(workspace_path)
+                except Exception as e:
+                    console.print(f"[yellow]Warning: Failed to remove directory: {e}[/yellow]")
+
+        console.print("[green]Cleanup completed[/green]")

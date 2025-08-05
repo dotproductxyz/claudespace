@@ -82,7 +82,7 @@ def create(name: str, config: str | None, base_dir: str, verbose: bool):
         manager = WorkspaceManager(Path(base_dir).expanduser())
 
         console.print(f"[bold]Creating workspace '{name}'[/bold]")
-        workspace = manager.create_workspace(name, workspace_config, verbose=verbose)
+        workspace = manager.create_workspace(name, workspace_config, config_path, verbose=verbose)
 
         console.print(f"[green]✓ Created workspace:[/green] {workspace.path}")
         console.print(f"[green]✓ Docker project:[/green] claude_{name}")
@@ -130,9 +130,9 @@ def list_workspaces(base_dir: str):
 
 @main.command()
 @click.argument("name")
-@click.argument("message")
+@click.argument("message", required=False)
 @click.option("--base-dir", default="~/claudespaces", help="Base directory for workspaces")
-def push(name: str, message: str, base_dir: str):
+def push(name: str, message: str | None, base_dir: str):
     """Push workspace changes to a GitHub branch."""
     manager = WorkspaceManager(Path(base_dir).expanduser())
 
@@ -158,6 +158,35 @@ def push(name: str, message: str, base_dir: str):
 
         # Add all changes
         subprocess.run(["git", "add", "-A"], check=True)
+
+        # Generate commit message if not provided
+        if not message:
+            console.print("[dim]Generating commit message...[/dim]")
+
+            # Get git diff for staged changes
+            diff_result = subprocess.run(
+                ["git", "diff", "--cached"], capture_output=True, text=True, check=True
+            )
+
+            # Use claude to generate commit message
+            claude_prompt = """Based on the following git diff, generate a concise and descriptive commit message. 
+The message should follow conventional commit format and be under 72 characters.
+Only output the commit message, nothing else.
+
+Git diff:
+""" + diff_result.stdout[:8000]  # Limit diff size to avoid token limits
+
+            claude_result = subprocess.run(
+                ["claude", "-p", claude_prompt], capture_output=True, text=True
+            )
+
+            if claude_result.returncode == 0:
+                message = claude_result.stdout.strip()
+                console.print(f"[green]Generated message:[/green] {message}")
+            else:
+                # Fallback to a generic message if claude fails
+                console.print("[yellow]Failed to generate message, using default[/yellow]")
+                message = f"Update workspace {name}"
 
         # Commit changes
         subprocess.run(["git", "commit", "-m", message], check=True)
@@ -295,6 +324,7 @@ def attach(name: str, base_dir: str):
         console.print(f"[red]Error attaching to workspace: {e}[/red]")
         raise click.Abort() from e
 
+
 def _open_workspace_path(manager, name, path, editor_cmd):
     try:
         workspace = manager.get_workspace(name)
@@ -323,7 +353,9 @@ def _open_workspace_path(manager, name, path, editor_cmd):
             console.print(f"[green]✓ Opened {editor_cmd} with:[/green] {target_path}")
         except FileNotFoundError:
             console.print(f"[red]Error: '{editor_cmd}' command not found[/red]")
-            console.print(f"[dim]Please ensure {editor_cmd} is installed and available in your PATH[/dim]")
+            console.print(
+                f"[dim]Please ensure {editor_cmd} is installed and available in your PATH[/dim]"
+            )
             if editor_cmd == "cursor":
                 console.print(
                     "[dim]You can install the Cursor CLI from: Cursor > Install 'cursor' command[/dim]"
