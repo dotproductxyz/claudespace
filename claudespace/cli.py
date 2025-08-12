@@ -11,6 +11,7 @@ from rich.table import Table
 
 from .config import load_config
 from .exceptions import ClaudespaceError, WorkspaceExistsError, WorkspaceNotFoundError
+from .settings import CLAUDE_COMMAND
 from .workspace import WorkspaceManager
 
 console = Console()
@@ -177,7 +178,7 @@ Git diff:
 """ + diff_result.stdout[:8000]  # Limit diff size to avoid token limits
 
             claude_result = subprocess.run(
-                ["claude", "-p", claude_prompt], capture_output=True, text=True
+                [CLAUDE_COMMAND, "-p", claude_prompt], capture_output=True, text=True
             )
 
             if claude_result.returncode == 0:
@@ -296,12 +297,12 @@ def attach(name: str, base_dir: str):
 
         if session_id:
             # Resume the existing session
-            cmd = ["claude", "--resume", session_id]
+            cmd = [CLAUDE_COMMAND, "--resume", session_id]
             console.print(f"[green]✓ Resuming Claude session for workspace '{name}'[/green]")
             console.print(f"[dim]Session ID: {session_id}[/dim]")
         else:
             # No session found, start a new one
-            cmd = ["claude"]
+            cmd = [CLAUDE_COMMAND]
             console.print(f"[green]✓ Attaching to workspace '{name}'[/green]")
             console.print("[dim]No saved session found, starting new conversation[/dim]")
 
@@ -309,13 +310,13 @@ def attach(name: str, base_dir: str):
 
         # Change to workspace directory and run claude
         os.chdir(workspace.path)
-        os.execvp("claude", cmd)
+        os.execvp(CLAUDE_COMMAND, cmd)
 
     except WorkspaceNotFoundError as e:
         console.print(f"[red]Error: {e}[/red]")
         raise click.Abort() from e
     except FileNotFoundError:
-        console.print("[red]Error: 'claude' command not found[/red]")
+        console.print(f"[red]Error: '{CLAUDE_COMMAND}' command not found[/red]")
         console.print(
             "[dim]Please install Claude CLI: https://docs.anthropic.com/en/docs/claude-code[/dim]"
         )

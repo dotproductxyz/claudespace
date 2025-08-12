@@ -13,6 +13,7 @@ from rich.console import Console
 from .config import SetupCommand, WorkspaceConfig
 from .docker_utils import DockerComposeManager
 from .exceptions import ClaudespaceError, WorkspaceExistsError, WorkspaceNotFoundError
+from .settings import CLAUDE_COMMAND
 
 console = Console()
 
@@ -158,7 +159,7 @@ class WorkspaceManager:
 
             return Workspace(name, workspace_path, config)
 
-        except Exception as e:
+        except Exception:
             # Clean up any resources that were created
             console.print("[yellow]Cleaning up resources...[/yellow]")
             self._cleanup_failed_workspace(name, workspace_path, resources_created, verbose)
@@ -418,7 +419,7 @@ class WorkspaceManager:
             # Run claude with a simple prompt to get a session started
             result = subprocess.run(
                 [
-                    "claude",
+                    CLAUDE_COMMAND,
                     "--print",
                     "--output-format",
                     "json",
