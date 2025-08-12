@@ -9,6 +9,7 @@ Build and development:
 - `just deps-dev` - Install dev dependencies
 - `just lint` - Run ruff linting and formatting
 - `just typecheck` - Run type checking with ty
+- `just test` - Run tests with pytest
 - `just check` - Run both lint and typecheck
 - `just build` - Build package
 - `just install` - Install claudespace tool globally
@@ -50,7 +51,11 @@ Claudespace is a Python CLI tool that creates isolated Docker environments for C
 
 ## Testing
 
-Currently no automated tests are configured. When adding tests:
-- Place them in a `tests/` directory
-- Use pytest as the test framework
-- Run with `uv run pytest`
+Tests are located in the `tests/` directory and use pytest as the test framework.
+
+Running tests:
+- `just test` - Run all tests with pytest
+- `uv run pytest` - Run tests directly with uv
+- `uv run pytest tests/test_settings.py` - Run specific test file
+- `uv run pytest -v` - Run tests with verbose output
+

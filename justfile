@@ -15,6 +15,10 @@ lint:
 typecheck:
     uv run ty check
 
+# Run tests with pytest
+test:
+    uv run pytest
+
 # Run both lint and typecheck
 check: lint typecheck
 
