@@ -176,8 +176,16 @@ Only output the commit message, nothing else.
 Git diff:
 """ + diff_result.stdout[:8000]  # Limit diff size to avoid token limits
 
+            # Get the claude command parts from config, default to ["claude"]
+            claude_cmd_parts = (
+                workspace.config.claude_command_parts if workspace.config else ["claude"]
+            )
+
             claude_result = subprocess.run(
-                ["claude", "-p", claude_prompt], capture_output=True, text=True
+                [*claude_cmd_parts, "-p", claude_prompt],
+                cwd=workspace.path,
+                capture_output=True,
+                text=True,
             )
 
             if claude_result.returncode == 0:
@@ -294,14 +302,17 @@ def attach(name: str, base_dir: str):
         # Get the stored session ID for this workspace
         session_id = manager.get_session_id(name)
 
+        # Get the claude command parts from config, default to ["claude"]
+        claude_cmd_parts = workspace.config.claude_command_parts if workspace.config else ["claude"]
+
         if session_id:
             # Resume the existing session
-            cmd = ["claude", "--resume", session_id]
+            cmd = [*claude_cmd_parts, "--resume", session_id]
             console.print(f"[green]✓ Resuming Claude session for workspace '{name}'[/green]")
             console.print(f"[dim]Session ID: {session_id}[/dim]")
         else:
             # No session found, start a new one
-            cmd = ["claude"]
+            cmd = claude_cmd_parts
             console.print(f"[green]✓ Attaching to workspace '{name}'[/green]")
             console.print("[dim]No saved session found, starting new conversation[/dim]")
 
@@ -309,13 +320,14 @@ def attach(name: str, base_dir: str):
 
         # Change to workspace directory and run claude
         os.chdir(workspace.path)
-        os.execvp("claude", cmd)
+        os.execvp(claude_cmd_parts[0], cmd)
 
     except WorkspaceNotFoundError as e:
         console.print(f"[red]Error: {e}[/red]")
         raise click.Abort() from e
     except FileNotFoundError:
-        console.print("[red]Error: 'claude' command not found[/red]")
+        claude_command = workspace.config.claude_command if workspace.config else "claude"
+        console.print(f"[red]Error: '{claude_command}' command not found[/red]")
         console.print(
             "[dim]Please install Claude CLI: https://docs.anthropic.com/en/docs/claude-code[/dim]"
         )

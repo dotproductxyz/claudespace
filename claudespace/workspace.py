@@ -151,14 +151,14 @@ class WorkspaceManager:
 
             # Start a Claude session for this workspace
             console.print("[dim]Initializing Claude session...[/dim]")
-            session_id = self.start_claude_session(workspace_path)
+            session_id = self.start_claude_session(workspace_path, config)
             if session_id:
                 self.set_session_id(name, session_id)
                 resources_created["session_created"] = True
 
             return Workspace(name, workspace_path, config)
 
-        except Exception as e:
+        except Exception:
             # Clean up any resources that were created
             console.print("[yellow]Cleaning up resources...[/yellow]")
             self._cleanup_failed_workspace(name, workspace_path, resources_created, verbose)
@@ -412,13 +412,13 @@ class WorkspaceManager:
         self.sessions[workspace_name] = session_id
         self._save_sessions()
 
-    def start_claude_session(self, workspace_path: Path) -> str | None:
+    def start_claude_session(self, workspace_path: Path, config: WorkspaceConfig) -> str | None:
         """Start a new Claude session and return the session ID."""
         try:
             # Run claude with a simple prompt to get a session started
             result = subprocess.run(
                 [
-                    "claude",
+                    *config.claude_command_parts,
                     "--print",
                     "--output-format",
                     "json",

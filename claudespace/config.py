@@ -1,6 +1,7 @@
 """Configuration parsing for claudespace."""
 
-from dataclasses import dataclass
+import shlex
+from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Literal, cast
 
@@ -52,6 +53,8 @@ class WorkspaceConfig:
     branch: str = "main"
     clone_depth: int = 1
     clone_strategy: CloneStrategy = "worktree"
+    claude_command: str = "claude"
+    claude_command_parts: list[str] = field(default_factory=lambda: ["claude"])
 
 
 def load_config(config_path: Path) -> WorkspaceConfig:
@@ -136,6 +139,10 @@ def load_config(config_path: Path) -> WorkspaceConfig:
     # Parse env files
     env_files = data.get("env_files", [".env"])
 
+    # Parse claude command
+    claude_command = data.get("claude_command", "claude")
+    claude_command_parts = shlex.split(claude_command)
+
     return WorkspaceConfig(
         version=1,
         git_url=git_url,
@@ -146,4 +153,6 @@ def load_config(config_path: Path) -> WorkspaceConfig:
         branch=branch,
         clone_depth=clone_depth,
         clone_strategy=clone_strategy,
+        claude_command=claude_command,
+        claude_command_parts=claude_command_parts,
     )

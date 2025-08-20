@@ -48,3 +48,6 @@ env_files:
   - .env
   - backend/.env
   - frontend/.env
+
+# Custom command to use instead of "claude" (optional)
+# claude_command: "just claude"  # Use if you have a wrapper script
