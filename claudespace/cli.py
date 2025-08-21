@@ -181,8 +181,10 @@ Git diff:
                 workspace.config.claude_command_parts if workspace.config else ["claude"]
             )
 
+            # Use stdin instead of -p to avoid shell escaping issues with multiline prompts
             claude_result = subprocess.run(
-                [*claude_cmd_parts, "-p", claude_prompt],
+                claude_cmd_parts,
+                input=claude_prompt,
                 cwd=workspace.path,
                 capture_output=True,
                 text=True,

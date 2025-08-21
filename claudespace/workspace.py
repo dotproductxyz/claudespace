@@ -10,7 +10,7 @@ from pathlib import Path
 
 from rich.console import Console
 
-from .config import SetupCommand, WorkspaceConfig
+from .config import SetupCommand, WorkspaceConfig, load_config
 from .docker_utils import DockerComposeManager
 from .exceptions import ClaudespaceError, WorkspaceExistsError, WorkspaceNotFoundError
 
@@ -176,8 +176,16 @@ class WorkspaceManager:
             else:
                 raise WorkspaceNotFoundError(f"Workspace '{name}' not found")
 
-        # TODO: Load config from workspace
-        return Workspace(name, workspace_path, None)
+        # Load config from workspace if it exists
+        config_path = workspace_path / ".claudespace.yaml"
+        config = None
+        if config_path.exists():
+            try:
+                config = load_config(config_path)
+            except Exception as e:
+                console.print(f"[yellow]Warning: Failed to load workspace config: {e}[/yellow]")
+
+        return Workspace(name, workspace_path, config)
 
     def list_workspaces(self) -> list[Workspace]:
         """List all workspaces."""
