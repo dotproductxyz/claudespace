@@ -152,17 +152,17 @@ class DockerComposeManager:
 
     def down(self, volumes: bool = False):
         """Stop Docker Compose services."""
-        # If compose file doesn't exist, try to stop by project name only
-        if not self.compose_file.exists():
-            console.print("[dim]Compose file not found, skipping Docker cleanup[/dim]")
-            return
-
-        cmd = ["docker", "compose", "-p", self.project_name, "-f", str(self.compose_file), "down"]
+        if self.compose_file.exists():
+            cmd = ["docker", "compose", "-p", self.project_name, "-f", str(self.compose_file), "down"]
+        else:
+            # Compose file missing — tear down by project name only
+            console.print("[dim]Compose file not found, tearing down by project name...[/dim]")
+            cmd = ["docker", "compose", "-p", self.project_name, "down"]
 
         if volumes:
             cmd.append("-v")
 
-        subprocess.run(cmd, cwd=self.workspace_path, check=True)
+        subprocess.run(cmd, check=True)
 
     def is_running(self) -> bool:
         """Check if services are running."""
