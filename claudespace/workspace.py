@@ -44,27 +44,42 @@ class Workspace:
         """Destroy workspace and Docker resources."""
         console.print("[dim]Stopping Docker services and removing volumes...[/dim]")
         compose = DockerComposeManager(self.path, f"claude_{self.name}")
-        compose.down(volumes=True)
+        try:
+            compose.down(volumes=True)
+        except Exception as e:
+            console.print(f"[yellow]Warning: Docker cleanup failed: {e}[/yellow]")
 
-        # Check if this is a worktree
+        # Check if this is a worktree and get main repo path before removal
         is_worktree = False
+        main_repo_path = None
         if self.path.exists():
             git_file = self.path / ".git"
             # .git is a file in worktrees, not a directory
             is_worktree = git_file.exists() and git_file.is_file()
+            if is_worktree:
+                # Read the .git file to find the main repo
+                # Format: "gitdir: /path/to/main/.git/worktrees/<name>"
+                gitdir_line = git_file.read_text().strip()
+                if gitdir_line.startswith("gitdir:"):
+                    gitdir = gitdir_line.split(":", 1)[1].strip()
+                    # Navigate up from .git/worktrees/<name> to the repo root
+                    main_repo_path = str(Path(gitdir).parent.parent.parent)
 
         if is_worktree:
             console.print(f"[dim]Removing git worktree: {self.path}[/dim]")
-            # Remove the worktree
             subprocess.run(
                 ["git", "worktree", "remove", str(self.path), "--force"],
                 capture_output=True,
                 text=True,
             )
-            # Also remove the branch
             branch_name = f"claude-{self.name}"
             console.print(f"[dim]Removing branch: {branch_name}[/dim]")
-            subprocess.run(["git", "branch", "-D", branch_name], capture_output=True, text=True)
+            subprocess.run(
+                ["git", "branch", "-D", branch_name],
+                capture_output=True,
+                text=True,
+                cwd=main_repo_path,
+            )
         elif self.path.exists():
             console.print(f"[dim]Removing workspace directory: {self.path}[/dim]")
             shutil.rmtree(self.path)
